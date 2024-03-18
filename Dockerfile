@@ -1,6 +1,6 @@
 FROM node:20-alpine
 
-org.opencontainers.image.source = "https://github.com/Luxxy-GF/discord-ilo4-bot"
+LABEL org.opencontainers.image.source = "https://github.com/Luxxy-GF/discord-ilo4-bot"
 
 RUN mkdir -p /usr/src/ilo
 WORKDIR /usr/src/ilo
