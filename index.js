@@ -1,5 +1,5 @@
 const Discord = require('discord.js');
-const { GatewayIntentBits, Partials } = require('discord.js');
+const { GatewayIntentBits, Partials, ActivityType } = require('discord.js');
 require('dotenv').config();
 const https = require('https')
 const axios = require('axios');
@@ -18,21 +18,13 @@ const axiosInstance = axios.create({
     }
 })
 
-const prefix = '!';
+const prefix = process.env.PREFIX;
 
 const client = new Discord.Client({
     intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
-        GatewayIntentBits.GuildMembers,
-        GatewayIntentBits.GuildMessageReactions,
-        GatewayIntentBits.GuildPresences,
-        GatewayIntentBits.GuildVoiceStates,
-        GatewayIntentBits.DirectMessages,
-        GatewayIntentBits.DirectMessageReactions,
-        GatewayIntentBits.DirectMessageTyping,
-        GatewayIntentBits.GuildInvites,
     ],
     partials: [Partials.Message, Partials.Channel, Partials.Reaction, Partials.User],
 })
@@ -48,14 +40,17 @@ client.on('ready', () => {
     setInterval(() => {
         axiosInstance.get('/redfish/v1/systems/1')
         .then(response => {
-            client.user.setActivity(response.data.PowerState, { type: 'WATCHING' });
+            client.user.setPresence({
+                activities: [{ name: `Server status is: ${response.data.PowerState}`, type: ActivityType.Custom }],
+                status: 'dnd',
+              });
         })
     }, 10000)
 });
 
 const logError = (msg, error) => {
     console.error(error.message)
-    msg.channel.send('Something went wrong, check the captains log.')
+    msg.reply('Something went wrong, check the captains log.')
 }
 
 const startServer = (state) => {
@@ -82,7 +77,14 @@ client.on('messageCreate', async message => {
 
     if (command === 'status') {
         getPowerState()
-            .then(state => message.reply(`Server is currently **${state}**`))
+
+            .then(state => message.reply({ embeds: [ 
+                new Discord.EmbedBuilder()
+                .setTitle('Server Status')
+                .addFields({ name: 'Power State', value: state})
+                .setColor(state === 'On' ? Discord.Colors.Green : Discord.Colors.Red)
+                .setTimestamp()
+            ]}))
             .catch(error => logError(message, error))
     }
 
