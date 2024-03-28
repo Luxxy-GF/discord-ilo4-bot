@@ -40,10 +40,20 @@ client.on('ready', () => {
     setInterval(() => {
         axiosInstance.get('/redfish/v1/systems/1')
         .then(response => {
-            client.user.setPresence({
-                activities: [{ name: `Server status is: ${response.data.PowerState}`, type: ActivityType.Custom }],
-                status: 'dnd',
-              });
+            axiosInstance.get('/redfish/v1/Chassis/1/Power')
+            .then(r => {
+                if (response.data.PowerState === 'On') {
+                    client.user.setActivity({
+                        name: `Power Usage: ${r.data.PowerControl[0].PowerConsumedWatts}W`,
+                        type: ActivityType.Custom
+                    })
+                } else {
+                    client.user.setActivity({
+                        name: 'Server is Off',
+                        type: ActivityType.Custom
+                    })
+                }
+            })
         })
     }, 10000)
 });
@@ -63,6 +73,21 @@ const stopServer = (state) => {
     if (state === 'Off') return 'Server is already powered off!'
     return axiosInstance.post('/redfish/v1/systems/1', { Action: 'Reset', ResetType: 'PushPowerButton' })
         .then(() => 'Initiating Power Down! ⚡')
+}
+
+const getPowerUsage = () => {
+    return axiosInstance.get('/redfish/v1/Chassis/1/Power')
+        .then(response => response.data.PowerControl[0].PowerConsumedWatts)
+}
+
+const getTermialOutput = () => {
+    return axiosInstance.get('/redfish/v1/Chassis/1/Thermal')
+        .then(response => response.data.Temperatures[0].ReadingCelsius)
+}
+
+const getSystem = () => {
+    return axiosInstance.get('/redfish/v1/systems/1')
+        .then(response => response.data)
 }
 
 client.on('messageCreate', async message => {
@@ -100,6 +125,64 @@ client.on('messageCreate', async message => {
             .then(state => stopServer(state))
             .then(response => message.reply(response))
             .catch(error => logError(message, error))
+    }
+
+    if (command === 'power') {
+        getPowerUsage()
+            .then(usage => message.reply({ embeds: [
+                new Discord.EmbedBuilder()
+                .setTitle('Power Usage')
+                .addFields({ name: 'Power Consumption', value: `${usage} Watts`})
+                .setColor(Discord.Colors.Blue)
+                .setTimestamp()
+            ]}))
+            .catch(error => logError(message, error))
+    }
+
+    if (command === 'temp') {
+        getTermialOutput()
+            .then(temp => message.reply({ embeds: [
+                new Discord.EmbedBuilder()
+                .setTitle('Temperature')
+                .addFields({ name: 'Temperature', value: `${temp}°C`})
+                .setColor(Discord.Colors.Blue)
+                .setTimestamp()
+            ]}))
+            .catch(error => logError(message, error))
+    }
+
+    if (command === 'system') {
+        getSystem()
+            .then(system => message.reply({ embeds: [
+                new Discord.EmbedBuilder()
+                .setTitle('System Information')
+                .addFields(
+                    { name: 'Manufacturer ', value: system.Manufacturer },
+                    { name: 'Model', value: system.Model },
+                    { name: 'Serial Number', value: system.SerialNumber },
+                    { name: 'UUID', value: system.UUID }
+                )
+                .setColor(Discord.Colors.Blue)
+                .setTimestamp()
+            ]}))
+            .catch(error => logError(message, error))
+    }
+
+    if (command === 'help') {
+        message.reply({ embeds: [
+            new Discord.EmbedBuilder()
+            .setTitle('Help Menu')
+            .addFields(
+                { name: 'Status', value: 'Check the current power state of the server.' },
+                { name: 'Start', value: 'Power on the server.' },
+                { name: 'Stop', value: 'Power off the server.' },
+                { name: 'Power', value: 'Check the current power usage of the server.' },
+                { name: 'Temp', value: 'Check the current temperature of the server.' },
+                { name: 'System', value: 'Check the system information of the server.' }
+            )
+            .setColor(Discord.Colors.Blue)
+            .setTimestamp()
+        ]})
     }
 });
 
