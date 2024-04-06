@@ -6,7 +6,8 @@ RUN mkdir -p /usr/src/ilo
 WORKDIR /usr/src/ilo
 COPY ./ /usr/src/ilo/
 
-RUN apk add --no-cache python3 make g++
+RUN apk add --no-cache python3 make g++ && \
+    npm install --global node-gyp && \
 RUN npm install
 
 CMD ["node index.js"]
