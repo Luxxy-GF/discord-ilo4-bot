@@ -7,7 +7,7 @@ WORKDIR /usr/src/ilo
 COPY ./ /usr/src/ilo/
 
 RUN apk add --no-cache python3 make g++
-RUN npm install --global node-gyp
+ENV PYTHON=/usr/bin/python3
 RUN npm install
 
 CMD ["node index.js"]
