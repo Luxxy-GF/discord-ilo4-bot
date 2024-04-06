@@ -6,6 +6,8 @@ RUN mkdir -p /usr/src/ilo
 WORKDIR /usr/src/ilo
 COPY ./ /usr/src/ilo/
 
+// fix the node-gyp error with python
+RUN apk add --no-cache python3 make g++
 RUN npm install
 
 CMD ["node index.js"]
