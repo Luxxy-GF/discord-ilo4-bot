@@ -3,8 +3,16 @@ const { GatewayIntentBits, Partials, ActivityType } = require('discord.js');
 require('dotenv').config();
 const https = require('https')
 const axios = require('axios');
-const { get } = require('http');
+const { createConnection } = require('mysql');
+const cron = require('node-cron')
 
+
+const con = createConnection({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASS,
+    database: process.env.DB_NAME
+})
 
 const agent = new https.Agent({
     rejectUnauthorized: false
@@ -56,6 +64,41 @@ client.on('ready', () => {
             })
         })
     }, 10000)
+    con.connect((err) => {
+        if (err) throw err;
+        console.log('Connected to database!')
+        con.query('CREATE TABLE IF NOT EXISTS power_usage (id INT AUTO_INCREMENT PRIMARY KEY, power INT)', (err, result) => {
+            if (err) throw err;
+            console.log('Table created')
+        })
+        con.query('CREATE TABLE IF NOT EXISTS temperature (id INT AUTO_INCREMENT PRIMARY KEY, temperature INT)', (err, result) => {
+            if (err) throw err;
+            console.log('Table created')
+        })
+    }
+    )
+    setInterval(() => {
+        axiosInstance.get('/redfish/v1/Chassis/1/Power')
+        .then(response => {
+            con.query('INSERT INTO power_usage (power) VALUES (?)', [response.data.PowerControl[0].PowerConsumedWatts], (err, result) => {
+                if (err) throw console.error(err);
+            })
+        })
+        axiosInstance.get('/redfish/v1/Chassis/1/Thermal')
+        .then(response => {
+            con.query('INSERT INTO temperature (temperature) VALUES (?)', [response.data.Temperatures[0].ReadingCelsius], (err, result) => {
+                if (err) throw console.error(err);
+            })
+        })
+    }, 10000)
+    cron.schedule('0 0 * * *', () => {
+        con.query('DELETE FROM power_usage WHERE id NOT IN (SELECT id FROM (SELECT id FROM power_usage ORDER BY id DESC LIMIT 100) foo)', (err, result) => {
+            if (err) throw console.error(err);
+        })
+        con.query('DELETE FROM temperature WHERE id NOT IN (SELECT id FROM (SELECT id FROM temperature ORDER BY id DESC LIMIT 100) foo)', (err, result) => {
+            if (err) throw console.error(err);
+        })
+    })
 });
 
 const logError = (msg, error) => {
@@ -87,15 +130,36 @@ const getTermialOutput = () => {
 
 const getSystem = () => {
     return axiosInstance.get('/redfish/v1/systems/1')
-        .then(response => response.data)
+    .then(response => response.data)
 }
 
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
     if (!message.content.startsWith(prefix)) return;
-    if (!message.channel.id === process.env.CHANNEL_ID) return;
+    if (message.channel.id !== process.env.CHANNEL_ID || message.author.id !== process.env.USER_ID) return message.reply('You are not authorized to use this bot in this channel.')
     const [command, ...args] = message.content.slice(prefix.length).split(' ');
-
+    
+    if (command === 'help') {
+        message.reply({ embeds: [
+            new Discord.EmbedBuilder()
+            .setTitle('Help Menu')
+            .addFields(
+                { name: 'Status', value: 'Check the current power state of the server.' },
+                { name: 'Start', value: 'Power on the server.' },
+                { name: 'Stop', value: 'Power off the server.' },
+                { name: 'Power', value: 'Check the current power usage of the server.' },
+                { name: 'Temp', value: 'Check the current temperature of the server.' },
+                { name: 'System', value: 'Check the system information of the server.' },
+                { name: 'Help', value: 'Display this help menu.' },
+                { name: 'Uptime', value: 'Check how long the bot has been online.' },
+                { name: 'Powerchart', value: 'Display a chart of the power usage.' },
+                { name: 'Tempchart', value: 'Display a chart of the temperature.' }
+            )
+            .setColor(Discord.Colors.Blue)
+            .setTimestamp()
+        ]})
+    }
+    
     if (command === 'ping') {
         message.reply('Pong!');
     }
@@ -168,21 +232,73 @@ client.on('messageCreate', async message => {
             .catch(error => logError(message, error))
     }
 
-    if (command === 'help') {
-        message.reply({ embeds: [
-            new Discord.EmbedBuilder()
-            .setTitle('Help Menu')
-            .addFields(
-                { name: 'Status', value: 'Check the current power state of the server.' },
-                { name: 'Start', value: 'Power on the server.' },
-                { name: 'Stop', value: 'Power off the server.' },
-                { name: 'Power', value: 'Check the current power usage of the server.' },
-                { name: 'Temp', value: 'Check the current temperature of the server.' },
-                { name: 'System', value: 'Check the system information of the server.' }
-            )
-            .setColor(Discord.Colors.Blue)
-            .setTimestamp()
-        ]})
+    if (command === 'uptime') {
+        const uptime = process.uptime()
+        const days = Math.floor(uptime / 86400)
+        const hours = Math.floor(uptime / 3600) % 24
+        const minutes = Math.floor(uptime / 60) % 60
+        const seconds = Math.floor(uptime % 60)
+        message.reply(`this bot has been online for ${days} days, ${hours} hours, ${minutes} minutes and ${seconds} seconds.`)
+    }
+
+    const { ChartJSNodeCanvas } = require('chartjs-node-canvas')
+    if (command === 'powerchart') {
+        con.query('SELECT * FROM power_usage', (err, result) => {
+            if (err) throw err;
+            const data = result.map(row => row.power)
+            const width = 800
+            const height = 400
+            const chartCallback = (ChartJS) => {
+                ChartJS.defaults.color = 'white'
+                ChartJS.defaults.font.size = 16
+            }
+            const chartJSNodeCanvas = new ChartJSNodeCanvas({ width, height, chartCallback })
+            const configuration = {
+                type: 'line',
+                data: {
+                    labels: Array.from({ length: data.length }, (_, i) => i),
+                    datasets: [{
+                        label: 'Power Usage',
+                        data,
+                        borderColor: 'rgb(75, 192, 192)',
+                        tension: 0.1
+                    }]
+                }
+            }
+            chartJSNodeCanvas.renderToBuffer(configuration)
+                .then(buffer => {
+                    message.reply({ files: [buffer] })
+                })
+        })
+    }
+    if (command === 'tempchart') {
+        con.query('SELECT * FROM temperature', (err, result) => {
+            if (err) throw err;
+            const data = result.map(row => row.temperature)
+            const width = 800
+            const height = 400
+            const chartCallback = (ChartJS) => {
+                ChartJS.defaults.color = 'white'
+                ChartJS.defaults.font.size = 16
+            }
+            const chartJSNodeCanvas = new ChartJSNodeCanvas({ width, height, chartCallback })
+            const configuration = {
+                type: 'line',
+                data: {
+                    labels: Array.from({ length: data.length }, (_, i) => i),
+                    datasets: [{
+                        label: 'Temperature',
+                        data,
+                        borderColor: 'rgb(75, 192, 192)',
+                        tension: 0.1
+                    }]
+                }
+            }
+            chartJSNodeCanvas.renderToBuffer(configuration)
+                .then(buffer => {
+                    message.reply({ files: [buffer] })
+                })
+        })
     }
 });
 
